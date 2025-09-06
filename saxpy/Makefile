@@ -1,52 +1,67 @@
+# -------- CUDA toolkit from the nvcc in PATH --------
+CUDA_HOME ?= $(shell dirname $(shell dirname $(shell readlink -f $(shell which nvcc))))
+CUDA_INC  := $(CUDA_HOME)/include
+CUDA_LIB  := $(CUDA_HOME)/lib64
 
-EXECUTABLE := cudaSaxpy
+# -------- Variant selection --------
+# Use: make baseline   or   make persistent
+VAR ?= baseline
 
-CU_FILES   := saxpy.cu
-
-CU_DEPS    :=
-
-CC_FILES   := main.cpp
-
-###########################################################
-ARCH := $(shell uname -m)
-
-ifeq ($(ARCH), aarch64)
-    CXX = g++
+ifeq ($(VAR),baseline)
+  CU_FILE     := saxpy.cu
+  EXECUTABLE  := cudaSaxpy_baseline
+  CPP_DEFS    := -DBUILD_BASELINE
+else ifeq ($(VAR),persistent)
+  CU_FILE     := saxpy_reuse_buffer.cu
+  EXECUTABLE  := cudaSaxpy_persistent
+  CPP_DEFS    := -DBUILD_PERSISTENT
 else
-    CXX = g++ -m64
+  $(error Unknown VAR '$(VAR)'; use baseline or persistent)
 endif
 
-OBJDIR=objs
-CXXFLAGS=-O3 -Wall
-ifeq ($(ARCH), Darwin)
-# Building on mac
-LDFLAGS=-L/usr/local/depot/cuda-8.0/lib/ -lcudart
-else
-# Building on Linux
-LDFLAGS=-L/usr/local/cuda/lib64/ -lcudart
-endif
-NVCC=nvcc
-NVCCFLAGS=-O3 -m64
+# -------- Toolchain/flags --------
+ARCH    := $(shell uname -m)
+CXX     := g++$(if $(filter-out aarch64,$(ARCH)), -m64)
+NVCC    := nvcc
 
+OBJDIR  := objs/$(VAR)
+CXXFLAGS  := -O3 -Wall -I$(CUDA_INC)
+NVCCFLAGS := -O3 -m64
+LDFLAGS   := -L$(CUDA_LIB) -lcudart
 
-OBJS=$(OBJDIR)/main.o  $(OBJDIR)/saxpy.o
+# -------- Sources/objects --------
+OBJ_MAIN := $(OBJDIR)/main.o
+OBJ_CU   := $(OBJDIR)/$(basename $(notdir $(CU_FILE))).o
+OBJS     := $(OBJ_MAIN) $(OBJ_CU)
 
-
-.PHONY: dirs clean
+# -------- Phony targets --------
+.PHONY: default baseline persistent all clean run
 
 default: $(EXECUTABLE)
 
-dirs:
-		mkdir -p $(OBJDIR)/
+baseline:
+	@$(MAKE) VAR=baseline default
+
+persistent:
+	@$(MAKE) VAR=persistent default
+
+all: baseline persistent
+
+run: $(EXECUTABLE)
+	./$(EXECUTABLE)
 
 clean:
-		rm -rf $(OBJDIR) *.ppm *~ $(EXECUTABLE)
+	rm -rf objs cudaSaxpy_* *.ppm *~
 
-$(EXECUTABLE): dirs $(OBJS)
-		$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(LDFLAGS)
+# -------- Build rules (explicit, no mixed implicit rules) --------
+$(EXECUTABLE): $(OBJS) | $(OBJDIR)
+	$(NVCC) -o $@ $(OBJS) $(LDFLAGS)
 
-$(OBJDIR)/%.o: %.cpp
-		$(CXX) $< $(CXXFLAGS) -c -o $@
+$(OBJDIR):
+	mkdir -p $@
 
-$(OBJDIR)/%.o: %.cu
-		$(NVCC) $< $(NVCCFLAGS) -c -o $@
+$(OBJ_MAIN): main.cpp | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) $(CPP_DEFS) -c $< -o $@
+
+$(OBJ_CU): $(CU_FILE) | $(OBJDIR)
+	$(NVCC) $(NVCCFLAGS) -c $< -o $@
