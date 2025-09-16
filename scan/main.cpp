@@ -3,6 +3,7 @@
 #include <getopt.h>
 #include <string>
 #include <cstring>
+#include <iostream>
 
 #include "CycleTimer.h"
 
@@ -141,6 +142,12 @@ int main(int argc, char** argv) {
         }  
     }
 
+    // std::cout << "Input Array:" << "\n"; 
+    // for(int i = 0; i < N; i++) {
+    //     printf("%i, ",inarray[i]);
+    // }
+    // std::cout << "\n"; 
+    
     printCudaInfo();
 
     double cudaTime = 50000.;
@@ -157,8 +164,20 @@ int main(int argc, char** argv) {
                 cudaTime = std::min(cudaTime, cudaScan(inarray, inarray+N, resultarray));
         }
 
+        std::cout << "My scan:" << "\n"; 
+        for(int i = 0; i < N; i++) {
+            printf("%i, ",resultarray[i]);
+        }
+        std::cout << "\n"; 
+
         // run CPU implementation to check correctness
         cpu_exclusive_scan(inarray, inarray+N, checkarray);
+
+        // std::cout << "Correct Result:" << "\n"; 
+        // for(int i = 0; i < N; i++) {
+        //     printf("%i, ",checkarray[i]);
+        // }
+        // std::cout << "\n"; 
 
         if (useThrust) { 
             printf("Thrust GPU time: %.3f ms\n", 1000.f * cudaTime);

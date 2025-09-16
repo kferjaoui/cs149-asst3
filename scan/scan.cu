@@ -42,6 +42,50 @@ static inline int nextPow2(int n) {
 // Also, as per the comments in cudaScan(), you can implement an
 // "in-place" scan, since the timing harness makes a copy of input and
 // places it in result
+
+__device__ inline size_t ilog2_pow2(size_t x) {
+    return __ffsll((long long)x) - 1;  // __ffs is 1-based; x must be != 0
+}
+
+
+__global__
+void kernel_exclusive_scan(int* input, int N, int* result)
+{
+    size_t tid = threadIdx.x;                         // local index (per-block)
+    size_t g = threadIdx.x + blockIdx.x * blockDim.x; // global index
+    
+    extern __shared__ int sh[];
+    
+    if(g < N) sh[tid] = input[g];
+    __syncthreads();
+
+    // Up-sweep phase
+    for(size_t d=0; d<ilog2_pow2(N)-1; d++){
+        if( (tid+1) % (1u << (d+1)) == 0 ){
+            sh[tid] += sh[tid - (1u << d)];
+        }
+        __syncthreads();
+    }
+
+    if (g == N-1) sh[tid] = 0;
+    __syncthreads();
+
+    int tmp;
+    
+    // Down-sweep phase
+    for(int d=ilog2_pow2(N)-1; d>=0; d--){
+        if( (tid+1) % (1u << (d+1)) == 0 ) {
+            tmp = sh[tid];
+            sh[tid] += sh[tid - (1u << d)];
+            sh[tid - (1u << d)] = tmp;
+        }
+        __syncthreads();
+    }
+    
+    if(g < N) result[g] = sh[tid];
+}
+
+
 void exclusive_scan(int* input, int N, int* result)
 {
 
@@ -54,7 +98,11 @@ void exclusive_scan(int* input, int N, int* result)
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
 
+    int threadsPerBlock = 128;
+    const dim3 grid(1);
+    int shmemBytes = threadsPerBlock * sizeof(int);
 
+    kernel_exclusive_scan<<<grid, threadsPerBlock, shmemBytes>>>(input, N, result);
 }
 
 
